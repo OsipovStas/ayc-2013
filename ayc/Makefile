@@ -2,11 +2,11 @@ CC=icpc -pg
 OPTIMIZATION=-O0
 LIB=
 CFLAGS=-std=c++11  -pedantic -Iincludes $(OPTIMIZATION) -vec-report=2
-CFLAGS_DEBUG=-mkl -W -g -Wall -Werror -std=c++11 -pedantic -Iincludes -O0 -vec-report=2 -debug all 
+CFLAGS_DEBUG=-mkl -tbb -W -g -Wall -Werror -std=c++11 -pedantic -Iincludes -O0 -vec-report=2 -debug all 
 CFLAGS_MIC=$(CFLAGS) -mmic
 LDFLAGS=-g -vec-report=2 
-LDFLAGS_DEBUG= -mkl -g -O0 -vec-report=2  -debug all 
-LDFLAGS_MIC=-openmp -g $(OPTIMIZATION) -vec-report=2 -mmic
+LDFLAGS_DEBUG= -mkl -ltbb -g -O0 -vec-report=2  -debug all 
+LDFLAGS_MIC=-g $(OPTIMIZATION) -vec-report=2 -mmic
 EXEC=run
 SRC=$(wildcard src/*.cpp)
 OBJ=$(SRC:src/%.cpp=obj/%.o)

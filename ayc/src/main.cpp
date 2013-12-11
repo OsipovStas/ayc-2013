@@ -13,7 +13,10 @@
 #include <boost/range/algorithm/sort.hpp>
 
 #include "mkl.h"
-
+#include <tbb/parallel_for.h>
+#include <tbb/blocked_range2d.h>
+#include <tbb/concurrent_vector.h>
+#include <tbb/task_scheduler_init.h>
 
 #define cimg_OS 0
 #include "CImg.h"
@@ -46,11 +49,13 @@ int main(int argc, char** argv) {
     if (argc < 5) return 0;
 
     int maxThreads = std::atoi(argv[1]);
+    maxThreads = (maxThreads > 0) ? maxThreads : tbb::task_scheduler_init::default_num_threads();
     float maxScale = std::atof(argv[2]);
     CImg<u_char> image(argv[3]);
     Image gray = readGrayImage(argv[3]).blur(BLUR);
     std::ofstream out("out.txt");
-    std::vector<Result> thirdGrade;
+    tbb::task_scheduler_init tsch(maxThreads);
+    tbb::concurrent_vector<Result> thirdGrade;
     std::vector<Result> finalResult;
 
     std::vector<Image> queryScales;
@@ -120,10 +125,15 @@ int main(int argc, char** argv) {
         }
     };
 
-    cimg_forXY(gray, x, y) {
-        CircleFilter(Point(x, y));
-    }
-
+    tbb::parallel_for(tbb::blocked_range2d<size_t>(0, 1024, 256, 0, 2048, 256),
+    [&](const tbb::blocked_range2d<size_t>& rng) {
+    	boost::for_each(boost::irange(rng.rows().begin(), rng.rows().end()), [&](size_t i) {
+	    boost::for_each(boost::irange(rng.cols().begin(), rng.cols().end()), [&](size_t j) {
+	        CircleFilter(Point(i, j));
+	    });
+	});
+    });
+    
     boost::for_each(thirdGrade, [&](const Result & candidate) {
         auto f = boost::find_if(finalResult, boost::bind<bool>([&](const Result & result) {
             return (std::abs(candidate.x - result.x) < (queryScales[candidate.queryID].width() + queryScales[result.queryID].width()) / 2) &&
