@@ -11,6 +11,7 @@
 #include <boost/range/numeric.hpp>
 #include <boost/bind.hpp>
 #include <boost/range/algorithm/sort.hpp>
+//#include <boost/date_time/posix_time/posix_time.hpp>
 
 #include "mkl.h"
 #include <tbb/parallel_for.h>
@@ -24,6 +25,17 @@
 #include "Core.hpp"
 
 using namespace cimg_library;
+
+//struct Log {
+//    boost::posix_time::ptime start;
+//    Log(const char* msg) : start(boost::posix_time::microsec_clock::local_time()) {
+//        std::cout << "Log started: " << msg << std::endl;
+//    }
+//    
+//    ~Log() {
+//        std::cout << "Log end: Time - " << (boost::posix_time::microsec_clock::local_time() - start).total_microseconds() << " mcs" << std::endl; 
+//    }
+//};
 
 Image readGrayImage(const char* filename) {
     CImg<u_char> image(filename);
@@ -45,16 +57,22 @@ struct Result {
     } 
 };
 
+const int GRAIN_SIZE = 256;
+
 int main(int argc, char** argv) {
     if (argc < 5) return 0;
-
     int maxThreads = std::atoi(argv[1]);
-    maxThreads = (maxThreads > 0) ? maxThreads : tbb::task_scheduler_init::default_num_threads();
     float maxScale = std::atof(argv[2]);
     CImg<u_char> image(argv[3]);
     Image gray = readGrayImage(argv[3]).blur(BLUR);
     std::ofstream out("out.txt");
-    tbb::task_scheduler_init tsch(maxThreads);
+    
+    tbb::task_scheduler_init tsch(tbb::task_scheduler_init::deferred);
+    if(maxThreads > 0) {
+        tsch.initialize(maxThreads);
+    } else {
+        tsch.initialize();
+    }
     tbb::concurrent_vector<Result> thirdGrade;
     std::vector<Result> finalResult;
 
@@ -124,8 +142,8 @@ int main(int argc, char** argv) {
             RadianFilter(center, min - std::begin(correlations));
         }
     };
-
-    tbb::parallel_for(tbb::blocked_range2d<size_t>(0, 1024, 256, 0, 2048, 256),
+    
+    tbb::parallel_for(tbb::blocked_range2d<size_t>(0, gray.width(), GRAIN_SIZE, 0, gray.height(), GRAIN_SIZE),
     [&](const tbb::blocked_range2d<size_t>& rng) {
     	boost::for_each(boost::irange(rng.rows().begin(), rng.rows().end()), [&](size_t i) {
 	    boost::for_each(boost::irange(rng.cols().begin(), rng.cols().end()), [&](size_t j) {
@@ -133,7 +151,6 @@ int main(int argc, char** argv) {
 	    });
 	});
     });
-    
     boost::for_each(thirdGrade, [&](const Result & candidate) {
         auto f = boost::find_if(finalResult, boost::bind<bool>([&](const Result & result) {
             return (std::abs(candidate.x - result.x) < (queryScales[candidate.queryID].width() + queryScales[result.queryID].width()) / 2) &&

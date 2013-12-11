@@ -14,7 +14,6 @@
 #include <boost/range/adaptors.hpp>
 #include <boost/range/algorithm.hpp>
 #include <boost/range/irange.hpp>
-//#include "boost/date_time/posix_time/posix_time.hpp"
 #include <boost/ref.hpp>
 
 #include "CImg.h"
@@ -29,13 +28,16 @@ const float BETA_THRESHOLD_INV = 1.0 / BETA_THRESHOLD;
 
 const float GAMMA_THRESHOLD = 1.0f;
 
+
+const int SCALES_NUMBER = 10;
+
 const int FULL_DEGREES = 360;
 const int ROTATIONS_NUMBER = 20;
 const int ROTATION_ANGLE = FULL_DEGREES / ROTATIONS_NUMBER;
 
 const int CIRCLES_NUMBER = 10;
 const int MIN_CIRCLE_RADIUS = 2;
-const int MAX_CIRCLE_RADIUS = 50;
+const int MAX_CIRCLE_RADIUS = 150;
 
 const float CIRCLE_FILTER_THRESHOLD = 0.95;
 const float RADIAN_FILTER_THRESHOLD = 0.9;
@@ -49,18 +51,7 @@ struct Point {
     }
 };
 
-//struct Log {
-//
-//    Log(const char* msg) : start(boost::posix_time::microsec_clock::local_time()) {
-//        std::cout << "Log begin: " << msg << std::endl;
-//    }
-//
-//    ~Log() {
-//        std::cout << "Log end. Time: " << (boost::posix_time::microsec_clock::local_time() - start).total_microseconds() << std::endl;
-//    }
-//
-//    boost::posix_time::ptime start;
-//};
+
 
 typedef CImg<float> Image;
 typedef std::vector<Point> Points;
@@ -76,8 +67,10 @@ float point2float(const Point& p, const Point& c, const Image& i);
 
 template<class OutputIterator>
 void generateScales(const Image& query, int maxScale, OutputIterator out) {
-    boost::for_each(boost::irange(1, maxScale + 1), [&](int i) {
-        *out++ = query.get_resize(-i * 100, -i * 100);
+    float diff = (maxScale - 1.0) / (SCALES_NUMBER - 1);
+    boost::for_each(boost::irange(0, SCALES_NUMBER), [&](int i) {
+        int factor = -std::floor((1 + diff * i) * 100);
+        *out++ = query.get_resize(factor, factor);
     });
 }
 

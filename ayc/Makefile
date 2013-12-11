@@ -1,12 +1,12 @@
-CC=icpc -pg
-OPTIMIZATION=-O0
+CC=icpc
+OPTIMIZATION=-O3 -xhost
 LIB=
-CFLAGS=-std=c++11  -pedantic -Iincludes $(OPTIMIZATION) -vec-report=2
-CFLAGS_DEBUG=-mkl -tbb -W -g -Wall -Werror -std=c++11 -pedantic -Iincludes -O0 -vec-report=2 -debug all 
-CFLAGS_MIC=$(CFLAGS) -mmic
-LDFLAGS=-g -vec-report=2 
-LDFLAGS_DEBUG= -mkl -ltbb -g -O0 -vec-report=2  -debug all 
-LDFLAGS_MIC=-g $(OPTIMIZATION) -vec-report=2 -mmic
+CFLAGS=-tbb -mkl -Wall -Werror  -std=c++11  -pedantic -Iincludes $(OPTIMIZATION)
+CFLAGS_DEBUG= -pg -mkl -tbb -g -Wall -Werror -std=c++11 -pedantic -Iincludes -O0 -debug all 
+CFLAGS_MIC=$(CFLAGS) -mmic -mkl -tbb
+LDFLAGS=-mkl -tbb $(OPTIMIZATION)
+LDFLAGS_DEBUG= -pg -mkl -tbb -g -O0 -debug all 
+LDFLAGS_MIC=$(OPTIMIZATION) -mkl -tbb -mmic
 EXEC=run
 SRC=$(wildcard src/*.cpp)
 OBJ=$(SRC:src/%.cpp=obj/%.o)
@@ -19,25 +19,25 @@ TEAM_ID = 0429b0a6d58790b77176754e72b0674f
 all:$(EXEC)
 
 mic:$(OBJ_MIC)
-	$(CC) -o $@ $^ $(LDFLAGS_MIC)
+	$(CC) $(LDFLAGS_MIC) -o $@ $^ 
 
 default:all
 
 debug:$(OBJ_DEBUG)
-	$(CC) -o $@ $^ $(LDFLAGS_DEBUG)
+	$(CC) $(LDFLAGS_DEBUG) -o $@ $^ 
 
 
 run:$(OBJ)
-	$(CC) -o $@ $^ $(LDFLAGS)
+	$(CC) $(LDFLAGS) -o $@ $^ 
 
 obj/%.o:src/%.cpp
-	$(CC) -o $@ -c $< $(CFLAGS)
+	$(CC) $(CFLAGS) -o $@ -c $< 
 
 obj/%.omic:src/%.cpp
-	$(CC) -o $@ -c $< $(CFLAGS_MIC)
+	$(CC) $(CFLAGS_MIC) -o $@ -c $< 
 
 obj/%.odeb:src/%.cpp
-	$(CC) -o $@ -c $< $(CFLAGS_DEBUG)
+	$(CC) $(CFLAGS_DEBUG) -o $@ -c $< 
 
 clean:
 	rm -f obj/*.o* $(EXEC) *.zip debug
