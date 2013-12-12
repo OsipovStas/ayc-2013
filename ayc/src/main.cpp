@@ -2,7 +2,6 @@
 #include <cstdlib>
 
 #include <iostream>
-#include <fstream>
 #include <string>
 #include <vector>
 
@@ -65,7 +64,6 @@ int main(int argc, char** argv) {
     float maxScale = std::atof(argv[2]);
     CImg<u_char> image(argv[3]);
     Image gray = readGrayImage(argv[3]).blur(BLUR);
-    std::ofstream out("out.txt");
     
     tbb::task_scheduler_init tsch(tbb::task_scheduler_init::deferred);
     if(maxThreads > 0) {
@@ -165,7 +163,7 @@ int main(int argc, char** argv) {
     });
     boost::sort(finalResult);
     boost::for_each(finalResult, [&](const Result& r) {
-       out << 1 + r.queryID / QUERY_SCALES_NUMBER << "\t" << r.x << "\t" << r.y << std::endl;
+       std::cout << 1 + r.queryID / QUERY_SCALES_NUMBER << "\t" << r.x << "\t" << r.y << std::endl;
     });
 }
 
