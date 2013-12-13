@@ -16,11 +16,13 @@
 #include <boost/range/irange.hpp>
 #include <boost/ref.hpp>
 
+
+#define cimg_OS 0
 #include "CImg.h"
 using namespace cimg_library;
 
 const float PI = 3.14159265f;
-
+const float MAX_IMAGE_SIZE = 4000000.0f;
 const float BLUR = 1.2f;
 
 const float BETA_THRESHOLD = 0.1f;
@@ -29,13 +31,13 @@ const float BETA_THRESHOLD_INV = 1.0 / BETA_THRESHOLD;
 const float GAMMA_THRESHOLD = 1.0f;
 
 
-const int SCALES_NUMBER = 10;
+const int SCALES_NUMBER = 8;
 
 const int FULL_DEGREES = 360;
 const int ROTATIONS_NUMBER = 20;
 const int ROTATION_ANGLE = FULL_DEGREES / ROTATIONS_NUMBER;
 
-const int CIRCLES_NUMBER = 10;
+const int CIRCLES_NUMBER = 15;
 const int MIN_CIRCLE_RADIUS = 2;
 const int MAX_CIRCLE_RADIUS = 150;
 
@@ -66,10 +68,10 @@ float point2float(const Point& p, const Point& c, const Image& i);
 
 
 template<class OutputIterator>
-void generateScales(const Image& query, int maxScale, OutputIterator out) {
-    float diff = (maxScale - 1.0) / (SCALES_NUMBER - 1);
+void generateScales(const Image& query, float minScale, float maxScale, OutputIterator out) {
+    float diff = (maxScale - minScale) / (SCALES_NUMBER - 1);
     boost::for_each(boost::irange(0, SCALES_NUMBER), [&](int i) {
-        int factor = -std::floor((1 + diff * i) * 100);
+        int factor = -std::floor((minScale + diff * i) * 100);
         *out++ = query.get_resize(factor, factor);
     });
 }

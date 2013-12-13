@@ -1,5 +1,5 @@
 CC=icpc
-OPTIMIZATION=-O3 -xhost
+OPTIMIZATION=-O3
 LIB=
 CFLAGS=-tbb -mkl -Wall -Werror  -std=c++11  -pedantic -Iincludes $(OPTIMIZATION)
 CFLAGS_DEBUG= -pg -mkl -tbb -g -Wall -Werror -std=c++11 -pedantic -Iincludes -O0 -debug all 
@@ -13,7 +13,7 @@ OBJ=$(SRC:src/%.cpp=obj/%.o)
 OBJ_MIC=$(SRC:src/%.cpp=obj/%.omic)
 OBJ_DEBUG=$(SRC:src/%.cpp=obj/%.odeb)
 
-TEAM_ID = 0429b0a6d58790b77176754e72b0674f
+TEAM_ID = 2c45ca54c555ad3c6a546db04a159064
 
 
 all:$(EXEC)

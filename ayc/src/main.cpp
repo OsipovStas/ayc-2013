@@ -40,7 +40,15 @@ Image readGrayImage(const char* filename) {
     CImg<u_char> image(filename);
     Image gray(image.width(), image.height(), 1, 1);
     convert2Gray(image, gray);
-    return std::move(gray);
+    return gray;
+}
+
+float getScaleRatio(const Image& i) {
+    float imageSize = i.width() * i.height();
+    if (imageSize < MAX_IMAGE_SIZE) {
+        return 1.000f;
+    }
+    return 1 / std::sqrt(imageSize / MAX_IMAGE_SIZE);
 }
 
 struct Result {
@@ -49,11 +57,12 @@ struct Result {
     int y;
     float corel;
 
-    Result(int queryID, int x, int y, float corel) : queryID(queryID), x(x), y(y), corel(corel) {};
-    
+    Result(int queryID, int x, int y, float corel) : queryID(queryID), x(x), y(y), corel(corel) {
+    };
+
     bool operator<(const Result& r) const {
         return queryID < r.queryID;
-    } 
+    }
 };
 
 const int GRAIN_SIZE = 256;
@@ -63,10 +72,11 @@ int main(int argc, char** argv) {
     int maxThreads = std::atoi(argv[1]);
     float maxScale = std::atof(argv[2]);
     CImg<u_char> image(argv[3]);
-    Image gray = readGrayImage(argv[3]).blur(BLUR);
-    
+    float ratio = getScaleRatio(image);
+    int scaleRatio = std::floor(ratio * 100);
+    Image gray = readGrayImage(argv[3]).resize(-scaleRatio, -scaleRatio).blur(BLUR);
     tbb::task_scheduler_init tsch(tbb::task_scheduler_init::deferred);
-    if(maxThreads > 0) {
+    if (maxThreads > 0) {
         tsch.initialize(maxThreads);
     } else {
         tsch.initialize();
@@ -77,7 +87,7 @@ int main(int argc, char** argv) {
     std::vector<Image> queryScales;
     boost::for_each(boost::irange(4, argc), [&](int i) {
         Image query = readGrayImage(argv[i]);
-        generateScales(query, maxScale, std::back_inserter(queryScales));
+        generateScales(query, 0.5 * ratio, maxScale * ratio, std::back_inserter(queryScales));
     });
     auto QUERY_NUMBER = argc - 4;
     auto QUERY_SCALES_NUMBER = queryScales.size();
@@ -140,30 +150,30 @@ int main(int argc, char** argv) {
             RadianFilter(center, min - std::begin(correlations));
         }
     };
-    
+
     tbb::parallel_for(tbb::blocked_range2d<size_t>(0, gray.width(), GRAIN_SIZE, 0, gray.height(), GRAIN_SIZE),
-    [&](const tbb::blocked_range2d<size_t>& rng) {
-    	boost::for_each(boost::irange(rng.rows().begin(), rng.rows().end()), [&](size_t i) {
-	    boost::for_each(boost::irange(rng.cols().begin(), rng.cols().end()), [&](size_t j) {
-	        CircleFilter(Point(i, j));
-	    });
-	});
-    });
+            [&](const tbb::blocked_range2d<size_t>& rng) {
+                boost::for_each(boost::irange(rng.rows().begin(), rng.rows().end()), [&](size_t i) {
+                    boost::for_each(boost::irange(rng.cols().begin(), rng.cols().end()), [&](size_t j) {
+                        CircleFilter(Point(i, j));
+                    });
+                });
+            });
     boost::for_each(thirdGrade, [&](const Result & candidate) {
         auto f = boost::find_if(finalResult, boost::bind<bool>([&](const Result & result) {
             return (std::abs(candidate.x - result.x) < (queryScales[candidate.queryID].width() + queryScales[result.queryID].width()) / 2) &&
-                   (std::abs(candidate.y - result.y) < (queryScales[candidate.queryID].height() + queryScales[result.queryID].height()) / 2);
+                    (std::abs(candidate.y - result.y) < (queryScales[candidate.queryID].height() + queryScales[result.queryID].height()) / 2);
         }, _1));
-        if(f != finalResult.end() && f -> corel > candidate.corel) {
+        if (f != finalResult.end() && f -> corel > candidate.corel) {
             *f = candidate;
         }
-        if(f == finalResult.end()) {
+        if (f == finalResult.end()) {
             finalResult.push_back(candidate);
         }
     });
     boost::sort(finalResult);
-    boost::for_each(finalResult, [&](const Result& r) {
-       std::cout << 1 + r.queryID / QUERY_SCALES_NUMBER << "\t" << r.x << "\t" << r.y << std::endl;
+    boost::for_each(finalResult, [&](const Result & r) {
+        std::cout << 1 + r.queryID / QUERY_SCALES_NUMBER << "\t" << (int)std::floor(r.x / ratio) << "\t" << (int)std::floor(r.y / ratio) << std::endl;
     });
 }
 
