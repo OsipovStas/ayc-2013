@@ -66,8 +66,6 @@ float hammingDistance(const Descriptor& d1, const Descriptor& d2) {
 
 
 float evalCorrelation(const Descriptor& x, const Descriptor& y) {
-    assert(x.size() == y.size());
-
     const int size = x.size();
     Descriptor xMeanCorrected(size, 1.0f);
     Descriptor yMeanCorrected(size, 1.0f);
@@ -92,7 +90,7 @@ float evalCorrelation(const Descriptor& x, const Descriptor& y) {
 
     float xMeanCorrectedNorm = cblas_snrm2(size, xMeanCorrected.data(), 1);
     float yMeanCorrectedNorm = cblas_snrm2(size, yMeanCorrected.data(), 1);
-
+    
     return (beta * xMeanCorrectedSquare) / (xMeanCorrectedNorm * yMeanCorrectedNorm);
 }
 

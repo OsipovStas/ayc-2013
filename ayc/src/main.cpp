@@ -93,69 +93,77 @@ int main(int argc, char** argv) {
     auto QUERY_NUMBER = argc - 4;
     auto QUERY_SCALES_NUMBER = queryScales.size();
 
+
     FeaturesVector circleSet(QUERY_SCALES_NUMBER, Features(CIRCLES_NUMBER));
     FeaturesVector briefSet(QUERY_SCALES_NUMBER, Features(DIRECTION_NUMBER));
 
-    DescriptorsVector queryCircleDescriptorsVector(QUERY_SCALES_NUMBER, Descriptors(CIRCLES_NUMBER));
-    DescriptorsVector queryBriefDescriptorsVector(QUERY_SCALES_NUMBER, Descriptors(DIRECTION_NUMBER));
+    DescriptorsVector queryCircleDescriptorsVector(QUERY_SCALES_NUMBER * CIRCLES_NUMBER);
+    Descriptors queryBriefDescriptors(QUERY_SCALES_NUMBER);
 
     Descriptors queryCircleDescriptors(QUERY_SCALES_NUMBER, Descriptor(CIRCLES_NUMBER));
     Descriptors queryIntensityDescriptors(QUERY_SCALES_NUMBER, Descriptor(CIRCLES_NUMBER));
+
 
     generateCirclesSet(queryScales, std::begin(circleSet));
     generateBriefSet(queryScales, std::begin(briefSet));
 
     evalQueryDescriptorsVector(circleSet, std::begin(queryScales), std::begin(queryCircleDescriptorsVector));
-    reduceDescriptorsVector(queryCircleDescriptorsVector, std::begin(queryCircleDescriptors), boost::bind(sumDescriptorReducer, _1));
-    reduceDescriptorsVector(queryCircleDescriptorsVector, std::begin(queryIntensityDescriptors), boost::bind(maxIntensityReducer, _1));
-    evalQueryDescriptorsVector(briefSet, std::begin(queryScales), std::begin(queryBriefDescriptorsVector));
+    reduceDescriptorsVector(queryCircleDescriptorsVector, QUERY_SCALES_NUMBER, std::begin(queryCircleDescriptors), boost::bind(sumDescriptorReducer, _1));
+    reduceDescriptorsVector(queryCircleDescriptorsVector, QUERY_SCALES_NUMBER, std::begin(queryIntensityDescriptors), boost::bind(maxIntensityReducer, _1));
 
+    boost::for_each(boost::irange(0, (int) QUERY_SCALES_NUMBER), [&](int i) {
+        auto img = queryScales[i];
+        evalPointDescriptor(briefSet[i][0], Point(img.width() / 2, img.height() / 2), img, std::back_inserter(queryBriefDescriptors[i]));
+    });
 
     auto BriefFilter = [&](const Point& center, size_t probableScale, size_t probableRotation) {
         Descriptor brief;
         evalPointDescriptor(briefSet[probableScale][probableRotation], center, gray, std::back_inserter(brief));
-        float hamming = hammingDistance(brief, queryBriefDescriptorsVector[probableScale][probableRotation]);
-        if(hamming < BRIEF_FILTER_THRESHOLD) {
+        float hamming = hammingDistance(brief, queryBriefDescriptors[probableScale]);
+        if (hamming < BRIEF_FILTER_THRESHOLD) {
             targets.push_back(Result(probableScale, center.x, center.y, hamming));
         }
     };
-    
+
+    int i = 0;
     auto CircleFilter = [&](const Point & center) {
-        DescriptorsVector circleDescriptorsVector(QUERY_SCALES_NUMBER, Descriptors(CIRCLES_NUMBER));
+            std::cout << ++i << std::endl;
+
+        DescriptorsVector circleDescriptorsVector(QUERY_SCALES_NUMBER * CIRCLES_NUMBER);
         Descriptors circleDescriptors(QUERY_SCALES_NUMBER, Descriptor(CIRCLES_NUMBER));
         std::vector<float> correlations(QUERY_SCALES_NUMBER);
         evalPointDescriptorsVector(circleSet, gray, center, std::begin(circleDescriptorsVector));
-        reduceDescriptorsVector(circleDescriptorsVector, std::begin(circleDescriptors), boost::bind(sumDescriptorReducer, _1));
+        reduceDescriptorsVector(circleDescriptorsVector, QUERY_SCALES_NUMBER, std::begin(circleDescriptors), boost::bind(sumDescriptorReducer, _1));
         boost::transform(queryCircleDescriptors, circleDescriptors, std::begin(correlations), boost::bind(evalCorrelation, _1, _2));
         auto max = boost::max_element(correlations);
         if (*max > CIRCLE_FILTER_THRESHOLD) {
             auto probableScale = max - std::begin(correlations);
-            auto probableRotation = chooseProbableRotation(circleDescriptorsVector[probableScale], queryIntensityDescriptors[probableScale], DIRECTION_NUMBER);
-            BriefFilter(center, probableScale, probableRotation);
+            targets.push_back(Result(1, center.x, center.y, 0));
+            //            auto probableRotation = chooseProbableRotation(circleDescriptorsVector[probableScale], queryIntensityDescriptors[probableScale], DIRECTION_NUMBER);
+            //            BriefFilter(center, probableScale, probableRotation);
         }
     };
-
     tbb::parallel_for(tbb::blocked_range2d<size_t>(0, gray.width(), GRAIN_SIZE, 0, gray.height(), GRAIN_SIZE),
-        [&](const tbb::blocked_range2d<size_t>& rng) {
-            boost::for_each(boost::irange(rng.rows().begin(), rng.rows().end()), [&](size_t i) {
-                boost::for_each(boost::irange(rng.cols().begin(), rng.cols().end()), [&](size_t j) {
-                    CircleFilter(Point(i, j));
+            [&](const tbb::blocked_range2d<size_t>& rng) {
+                boost::for_each(boost::irange(rng.rows().begin(), rng.rows().end()), [&](size_t i) {
+                    boost::for_each(boost::irange(rng.cols().begin(), rng.cols().end()), [&](size_t j) {
+                        CircleFilter(Point(i, j));
+                    });
                 });
             });
-   });
 
-    boost::for_each(targets, [&](const Result & candidate) {
-        auto f = boost::find_if(finalResult, boost::bind<bool>([&](const Result & result) {
-            return (std::abs(candidate.x - result.x) < (queryScales[candidate.queryID].width() + queryScales[result.queryID].width()) / 2) &&
-                    (std::abs(candidate.y - result.y) < (queryScales[candidate.queryID].height() + queryScales[result.queryID].height()) / 2);
-        }, _1));
-        if (f != finalResult.end() && f -> corel > candidate.corel) {
-            *f = candidate;
-        }
-        if (f == finalResult.end()) {
-            finalResult.push_back(candidate);
-        }
-    });
+    //    boost::for_each(targets, [&](const Result & candidate) {
+    //        auto f = boost::find_if(finalResult, boost::bind<bool>([&](const Result & result) {
+    //            return (std::abs(candidate.x - result.x) < (queryScales[candidate.queryID].width() + queryScales[result.queryID].width()) / 2) &&
+    //                    (std::abs(candidate.y - result.y) < (queryScales[candidate.queryID].height() + queryScales[result.queryID].height()) / 2);
+    //        }, _1));
+    //        if (f != finalResult.end() && f -> corel > candidate.corel) {
+    //            *f = candidate;
+    //        }
+    //        if (f == finalResult.end()) {
+    //            finalResult.push_back(candidate);
+    //        }
+    //    });
     boost::sort(finalResult);
     boost::for_each(finalResult, [&](const Result & r) {
         std::cout << 1 + r.queryID / QUERY_SCALES_NUMBER << "\t" << (int) std::floor(r.x / ratio) << "\t" << (int) std::floor(r.y / ratio) << std::endl;

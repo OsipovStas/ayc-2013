@@ -73,7 +73,7 @@ typedef std::vector<Points> Features;
 typedef std::vector<Features> FeaturesVector;
 typedef std::vector<float> Descriptor;
 typedef std::vector<Descriptor> Descriptors;
-typedef std::vector<Descriptors> DescriptorsVector;
+typedef std::vector<Descriptor> DescriptorsVector;
 
 
 float sumDescriptorReducer(const Descriptor& d);
@@ -138,34 +138,35 @@ void evalQueryDescriptors(const FeaturesVector& featureSet, InputImageIterator i
     });
 }
 
-template<class OutputIterator>
-void evalPointDescriptors(const Features& features, const Image& i, const Point& c, OutputIterator out) {
-    if (isFitImage(getMaxRadius(features), i, c)) {
+template<class OutDescriptorIterator>
+void evalPointDescriptors(const Features& features, const Image& i, const Point& c, OutDescriptorIterator out) {
         boost::for_each(features, [&](const Points & points) {
             evalPointDescriptor(points, c, i, std::back_inserter(*out++));
         });
-    }
 }
 
-template<class OutputIterator>
-void evalPointDescriptorsVector(const FeaturesVector& featuresVector, const Image& i, const Point& c, OutputIterator out) {
+template<class OutDescriptorIterator>
+void evalPointDescriptorsVector(const FeaturesVector& featuresVector, const Image& i, const Point& c, OutDescriptorIterator out) {
     boost::for_each(featuresVector, [&](const Features & features) {
-        evalPointDescriptors(features, i, c, std::begin(*out++));
+        if (isFitImage(getMaxRadius(features), i, c)) {
+            evalPointDescriptors(features, i, c, out++);
+        }
     });
 }
 
-template<class InputImageIterator, class OutputIterator>
-void evalQueryDescriptorsVector(const FeaturesVector& featureSet, InputImageIterator images, OutputIterator out) {
+template<class InputImageIterator, class OutDescriptorIterator>
+void evalQueryDescriptorsVector(const FeaturesVector& featureSet, InputImageIterator images, OutDescriptorIterator out) {
     boost::for_each(featureSet, [&](const Features & features) {
         auto image = *images++;
-        evalPointDescriptors(features, image, Point(image.width() / 2, image.height() / 2), std::begin(*out++));
+        evalPointDescriptors(features, image, Point(image.width() / 2, image.height() / 2), out++);
     });
 }
 
-template<class OutputIterator, class DescriptorReducer>
-void reduceDescriptorsVector(const DescriptorsVector& descriptorsVector, OutputIterator out, DescriptorReducer reducer) {
-    boost::for_each(descriptorsVector, [&](const Descriptors & descriptors) {
-        boost::transform(descriptors, std::back_inserter(*out++), reducer);
+template<class OutDescriptorIterator, class DescriptorReducer>
+void reduceDescriptorsVector(const DescriptorsVector& descriptorsVector, int reduceSize, OutDescriptorIterator out, DescriptorReducer reducer) {
+    boost::for_each(boost::irange(0, reduceSize), [&](int i) {
+        auto begin = std::begin(descriptorsVector) + i * descriptorsVector.size() / reduceSize;
+        std::transform(begin, begin + reduceSize, std::back_inserter(*out++), reducer);
     });
 }
 
@@ -174,7 +175,11 @@ void generateRandomPoints(size_t number, Out out) {
     std::default_random_engine generator;
     std::normal_distribution<float> distribution(0, number * number / 25.0f);
     for (size_t i = 0; i < number * 32; ++i) {
-        *out++ = distribution(generator);
+         auto n = distribution(generator);
+         while(std::abs(n) > number / 2) {
+             n = distribution(generator);
+         }
+         *out++ = n;
     }
 }
 

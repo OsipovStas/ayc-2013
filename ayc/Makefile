@@ -1,5 +1,5 @@
 CC=icpc
-OPTIMIZATION=-O3
+OPTIMIZATION=-O0
 LIB=
 CFLAGS=-tbb -mkl -Wall -Werror  -std=c++11  -pedantic -Iincludes $(OPTIMIZATION)
 CFLAGS_DEBUG= -pg -mkl -tbb -g -Wall -Werror -std=c++11 -pedantic -Iincludes -O0 -debug all 
