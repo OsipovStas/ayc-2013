@@ -13,7 +13,6 @@ img = cv2.imread(image, cv2.IMREAD_COLOR)
 
 with open(targets, "r") as f:
     for line in f:
-	print line
         (_, x, y) = line.split()
         cv2.circle(img, (int(x), int(y)), 20, (255, 0, 255), -1)
 

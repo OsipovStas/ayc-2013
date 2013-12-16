@@ -8,6 +8,24 @@
 
 #include <mkl_cblas.h>
 
+bool Point::operator<(const Point& o) const {
+    if(y >= 0) {
+        if(o.y < 0) {
+            return true;
+        }
+        return o.x < x;
+    } else {
+        if(o.y == 0 && o.x > 0) {
+            return false;
+        }
+        if(o.y > 0) {
+            return false;
+        }
+        return x < o.x;
+    }
+}
+
+
 
 void convert2Gray(const CImg<u_char>& colorImage, Image& grayImage) {
     static const float R = 0.299f;
@@ -33,9 +51,19 @@ float point2float(const Point& p, const Point& c, const Image& i) {
     return i(p.x + c.x, p.y + c.y);
 }
 
-float evalSample(const Points& points, const Point& center, const Image& image) {
-    return boost::accumulate(points | boost::adaptors::transformed(boost::bind<float>(point2float, _1, center, boost::cref(image))), 0.0f);
+
+float hammingDistance(const Descriptor& d1, const Descriptor& d2) {
+    int size = std::min(d1.size(), d2.size()) / 2;
+    int hamming = 0;
+    boost::for_each(boost::irange(0, size), [&](int i) {
+       int pair = i + size;
+       if((d1[i] < d1[pair]) ^ (d2[i] < d2[pair])) {
+           ++hamming;
+       }
+    });
+    return hamming / (float)(size);
 }
+
 
 float evalCorrelation(const Descriptor& x, const Descriptor& y) {
     assert(x.size() == y.size());
@@ -82,8 +110,7 @@ void generateCircle(int radius, const Point& center, Points& circle) {
     circle.push_back(Point(x0 - radius, y0));
 
     while (y < x) {
-        if (error > 0) 
-        {
+        if (error > 0) {
             x--;
             errorX += 2;
             error += errorX;
@@ -100,33 +127,37 @@ void generateCircle(int radius, const Point& center, Points& circle) {
         circle.push_back(Point(x0 + y, y0 - x));
         circle.push_back(Point(x0 - y, y0 - x));
     }
+    boost::sort(circle);
 }
 
-void generateRadianLine(int angle, int radius, const Point& center, Points& radianLine) {
-    int x0 = center.x;
-    int y0 = center.y;
 
-    int x1 = std::cos(-angle * PI / 180.0) * radius + x0;
-    int y1 = std::sin(-angle * PI / 180.0) * radius + y0;
-
-
-
-    int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
-    int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
-    int err = dx + dy, e2; 
-
-    for (;;) { /* loop */
-        radianLine.push_back(Point(x0, y0));
-        if (x0 == x1 && y0 == y1) break;
-        e2 = 2 * err;
-        if (e2 >= dy) {
-            err += dy;
-            x0 += sx;
-        } /* e_xy+e_x > 0 */
-        if (e2 <= dx) {
-            err += dx;
-            y0 += sy;
-        } /* e_xy+e_y < 0 */
-    }
+float maxIntensityReducer(const Descriptor& sample) {
+    Descriptor tmp(sample);
+    float length = sample.size();
+    int kSize = tmp.size() / KERNEL_SIZE;
+    std::copy_n(tmp.begin(), kSize, std::back_inserter(tmp));
+    float init = std::accumulate(std::begin(tmp), std::begin(tmp) + kSize, 0.0f);
+    Descriptor kernelSum;
+    std::transform(std::begin(tmp) + kSize, std::end(tmp), std::begin(tmp), std::back_inserter(kernelSum), boost::bind<float>([&](float f2, float f1) {
+        init += (f2 - f1);
+        return init;
+    }, _1, _2));
+    return (boost::max_element(kernelSum) - std::begin(kernelSum)) / length;
 }
 
+int chooseProbableRotation(const Descriptors& analyzed, const Descriptor& query, size_t directionNumber) {
+    Descriptor directions;
+    boost::transform(analyzed
+            | boost::adaptors::transformed(maxIntensityReducer),
+            query,
+            std::back_inserter(directions),
+            std::minus<float>());
+    int rotation = static_cast<int> (std::floor(directionNumber * boost::accumulate(directions, 0.0f) / directions.size()));
+    rotation = rotation < 0 ? (directionNumber + rotation) : rotation;
+    return rotation;
+}
+
+
+float sumDescriptorReducer(const Descriptor& d) {
+    return boost::accumulate(d, 0.0f);
+}

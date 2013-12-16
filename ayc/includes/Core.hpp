@@ -8,13 +8,22 @@
 #ifndef CORE_HPP
 #define	CORE_HPP
 
+#include <cmath>
+
 #include <vector>
+#include <numeric>
+#include <random>
+#include <functional>
 
 #include <boost/bind.hpp>
 #include <boost/range/adaptors.hpp>
 #include <boost/range/algorithm.hpp>
 #include <boost/range/irange.hpp>
 #include <boost/ref.hpp>
+#include "boost/range/numeric.hpp"
+
+
+#include <mkl_cblas.h>
 
 
 #define cimg_OS 0
@@ -23,37 +32,40 @@ using namespace cimg_library;
 
 const float PI = 3.14159265f;
 const float MAX_IMAGE_SIZE = 4000000.0f;
-const float BLUR = 1.2f;
+const float BLUR = 2.1f;
 
 const float BETA_THRESHOLD = 0.1f;
 const float BETA_THRESHOLD_INV = 1.0 / BETA_THRESHOLD;
 
 const float GAMMA_THRESHOLD = 1.0f;
 
-
 const int SCALES_NUMBER = 8;
 
 const int FULL_DEGREES = 360;
-const int ROTATIONS_NUMBER = 20;
-const int ROTATION_ANGLE = FULL_DEGREES / ROTATIONS_NUMBER;
 
 const int CIRCLES_NUMBER = 15;
 const int MIN_CIRCLE_RADIUS = 2;
 const int MAX_CIRCLE_RADIUS = 150;
 
 const float CIRCLE_FILTER_THRESHOLD = 0.95;
-const float RADIAN_FILTER_THRESHOLD = 0.9;
-const float TEMPLATE_FILTER_THRESHOLD = 0.9;
+const float BRIEF_FILTER_THRESHOLD = 0.25;
+
+const int KERNEL_SIZE = 8;
+const int DIRECTION_NUMBER = 36;
+
+const float COS = std::cos(2 * PI / DIRECTION_NUMBER);
+const float SIN = std::sin(2 * PI / DIRECTION_NUMBER);
 
 struct Point {
-    const int x;
-    const int y;
+    int x;
+    int y;
 
     Point(int x, int y) : x(x), y(y) {
     }
+
+    bool operator<(const Point& o) const;
+
 };
-
-
 
 typedef CImg<float> Image;
 typedef std::vector<Point> Points;
@@ -64,91 +76,56 @@ typedef std::vector<Descriptor> Descriptors;
 typedef std::vector<Descriptors> DescriptorsVector;
 
 
+float sumDescriptorReducer(const Descriptor& d);
+
+bool isFitImage(float r, const Image& i, const Point& c);
+
+float getMaxRadius(const Features& f);
+
 float point2float(const Point& p, const Point& c, const Image& i);
 
+void generateCircle(int radius, const Point& center, Points& circle);
+
+void convert2Gray(const CImg<u_char>& colorImage, Image& grayImage);
+
+float maxIntensityReducer(const Descriptor& circleSample);
+
+int chooseProbableRotation(const Descriptors& analyzed, const Descriptor& query, size_t directionNumber);
+
+float evalCorrelation(const Descriptor& x, const Descriptor& y);
+
+float hammingDistance(const Descriptor& d1, const Descriptor& d2);
 
 template<class OutputIterator>
 void generateScales(const Image& query, float minScale, float maxScale, OutputIterator out) {
     float diff = (maxScale - minScale) / (SCALES_NUMBER - 1);
     boost::for_each(boost::irange(0, SCALES_NUMBER), [&](int i) {
         int factor = -std::floor((minScale + diff * i) * 100);
-        *out++ = query.get_resize(factor, factor);
+        *out++ = query.get_resize(factor, factor).blur(BLUR);
     });
 }
-
-template<class SinglePassRange, class OutputIterator>
-void generateQueryRotations(const SinglePassRange& queries, OutputIterator out) {
-    boost::for_each(queries, [&](const Image & image) {
-        auto inserter = std::back_inserter(*out++);
-        boost::for_each(boost::irange(0, FULL_DEGREES, ROTATION_ANGLE), [&](int angle) {
-            inserter = image.get_rotate(angle).blur(BLUR);
-        });
-    });
-}
-
-void generateCircle(int radius, const Point& center, Points& circle);
 
 template <class SinglePassRange, class OutputIterator>
 void generateCirclesSet(const SinglePassRange& queries, OutputIterator out) {
     boost::for_each(queries, [&](const Image & image) {
         auto featuresOut = std::begin(*out++);
         auto maxRadius = std::min(std::min(image.height(), image.width()) / 2, MAX_CIRCLE_RADIUS);
-        auto diff = std::max(maxRadius / CIRCLES_NUMBER, 1);
-        boost::for_each(boost::irange(1, CIRCLES_NUMBER + 1), [&](int i) {
-            int radius = std::min(i * diff, maxRadius);
-            generateCircle(radius, Point(0, 0), *featuresOut++);
-        });
-    });
-}
-
-void generateRadianLine(int angle, int radius, const Point& center, Points& radianLine);
-
-template <class SinglePassRange, class OutputIterator>
-void generateRadianSet(const SinglePassRange& queries, OutputIterator out) {
-    boost::for_each(queries, [&](const Image & image) {
-        auto featuresOut = std::begin(*out++);
-        auto radius = std::min(std::min(image.height(), image.width()) / 2, MAX_CIRCLE_RADIUS);
-                radius = (radius / CIRCLES_NUMBER) * CIRCLES_NUMBER;
-                boost::for_each(boost::irange(0, FULL_DEGREES, ROTATION_ANGLE), [&](int angle) {
-                    generateRadianLine(angle, radius, Point(0, 0), *featuresOut++);
+                auto diff = std::max(maxRadius / CIRCLES_NUMBER, 1);
+                boost::for_each(boost::irange(1, CIRCLES_NUMBER + 1), [&](int i) {
+                    int radius = std::min(i * diff, maxRadius);
+                    generateCircle(radius, Point(0, 0), *featuresOut++);
                 });
     });
 }
 
-template<class SinglePassRange, class OutputIterator>
-void generatePointSet(const SinglePassRange& queriesRotations, OutputIterator out) {
-    boost::for_each(queriesRotations, [&](const std::vector<Image>& rotations) {
-        auto featuresOut = std::begin(*out++);
-        boost::for_each(rotations, [&](const Image & image) {
-            auto inserter = std::back_inserter(*featuresOut++);
-            auto c = Point(image.width() / 2, image.height() / 2);
-            cimg_forXY(image, x, y) {
-                if (image(x, y) != 0) {
-                    inserter = Point(x - c.x, y - c.y);
-                }
-            }
-        });
-    });
+template<class OutputIterator>
+void evalPointDescriptor(const Points& points, const Point& c, const Image& image, OutputIterator out) {
+    boost::transform(points, out, boost::bind<float>(point2float, _1, boost::cref(c), boost::cref(image)));
 }
-
-void convert2Gray(const CImg<u_char>& colorImage, Image& grayImage);
-
-float evalSample(const Points& points, const Point& center, const Image& image);
-
-template <class OutputIterator>
-void evalQueryFeaturesSampleDescriptor(const Features& points, const Image& i, OutputIterator out) {
-    boost::transform(points, out, boost::bind<float>(evalSample, _1, Point(i.width() / 2, i.height() / 2), boost::cref(i)));
-}
-
-template<class OutputIterator> 
-void evalPointDescriptor(const Points& points, const Point& p, const Image& image, OutputIterator out) {
-    boost::transform(points, out, boost::bind<float>(point2float, _1, boost::cref(p), boost::cref(image)));
-}
-
 
 template <class ImageInputIterator, class OutputIterator>
 void evalQueryFeaturesPointDescriptor(const Features& features, ImageInputIterator images, OutputIterator out) {
-    boost::for_each(features, [&](const Points& points) {
+    boost::for_each(features, [&](const Points & points) {
         auto image = *images++;
         evalPointDescriptor(points, Point(image.width() / 2, image.height() / 2), image, std::back_inserter(*out++));
     });
@@ -161,50 +138,87 @@ void evalQueryDescriptors(const FeaturesVector& featureSet, InputImageIterator i
     });
 }
 
-template<class InputImageIterator, class OutputIterator>
-void evalQueryTemplateDescriptors(const FeaturesVector& featureSet, InputImageIterator images, OutputIterator out) {
-    boost::for_each(featureSet, [&](const Features & features) {
-        evalQueryFeaturesPointDescriptor(features, std::begin(*images++),  std::begin(*out++));
-    });
-}
-
-
-bool isFitImage(float r, const Image& i, const Point& c);
-float getMaxRadius(const Features& f);
-
 template<class OutputIterator>
-void evalFeaturesSampleDescriptor(const Features& features, const Image& i, const Point& c, OutputIterator out) {
+void evalPointDescriptors(const Features& features, const Image& i, const Point& c, OutputIterator out) {
     if (isFitImage(getMaxRadius(features), i, c)) {
-        boost::transform(features, out, boost::bind<float>(evalSample, _1, c, boost::cref(i)));
+        boost::for_each(features, [&](const Points & points) {
+            evalPointDescriptor(points, c, i, std::back_inserter(*out++));
+        });
     }
-
 }
 
 template<class OutputIterator>
-void evalDescriptors(const FeaturesVector& featureSet, const Image& image, const Point& center, OutputIterator out) {
+void evalPointDescriptorsVector(const FeaturesVector& featuresVector, const Image& i, const Point& c, OutputIterator out) {
+    boost::for_each(featuresVector, [&](const Features & features) {
+        evalPointDescriptors(features, i, c, std::begin(*out++));
+    });
+}
+
+template<class InputImageIterator, class OutputIterator>
+void evalQueryDescriptorsVector(const FeaturesVector& featureSet, InputImageIterator images, OutputIterator out) {
     boost::for_each(featureSet, [&](const Features & features) {
-        evalFeaturesSampleDescriptor(features, image, center, std::begin(*out++));
+        auto image = *images++;
+        evalPointDescriptors(features, image, Point(image.width() / 2, image.height() / 2), std::begin(*out++));
     });
 }
 
-template<class InputImagesIterator, class OutputIterator>
-void evalQueryRadianDescriptorsVector(const FeaturesVector& featureSet, InputImagesIterator images, OutputIterator out) {
-    Descriptors radianDescriptors(featureSet.size(), Descriptor(ROTATIONS_NUMBER));
-    evalQueryDescriptors(featureSet, images, std::begin(radianDescriptors));
-    boost::for_each(radianDescriptors, [&](const Descriptor & d) {
-        auto DescriptorsOut = std::begin(*out++);
-        boost::for_each(boost::irange(0, ROTATIONS_NUMBER), [&](int r) {
-            boost::rotate_copy(d, std::begin(d) + r, std::back_inserter(*DescriptorsOut++));
-        });
+template<class OutputIterator, class DescriptorReducer>
+void reduceDescriptorsVector(const DescriptorsVector& descriptorsVector, OutputIterator out, DescriptorReducer reducer) {
+    boost::for_each(descriptorsVector, [&](const Descriptors & descriptors) {
+        boost::transform(descriptors, std::back_inserter(*out++), reducer);
     });
 }
 
-float evalCorrelation(const Descriptor& x, const Descriptor& y);
+template<class Out>
+void generateRandomPoints(size_t number, Out out) {
+    std::default_random_engine generator;
+    std::normal_distribution<float> distribution(0, number * number / 25.0f);
+    for (size_t i = 0; i < number * 32; ++i) {
+        *out++ = distribution(generator);
+    }
+}
 
-void generateQueries(const Image& pattern, std::vector<std::vector<Image> >& queries, int maxScale);
-void generateRotations(const Image& pattern, std::vector<Image>& rotations);
+template<class Out>
+void generateRotations(const std::vector<float>& pts, Out out) {
+    std::vector<float> tmp(pts);
+    for (size_t i = 0; i < DIRECTION_NUMBER; ++i) {
+        boost::copy(tmp, std::begin(*out++));
+        cblas_srot(tmp.size() / 2, tmp.data(), 1, tmp.data() + tmp.size() / 2, 1, COS, SIN);
+    }
+}
 
-void generateRadiansSet(const std::vector<std::vector<Image> >& queries, std::vector<std::vector<Points> >& radiansSet);
+template<class OutPointsIterator>
+void generateBriefPoints(const std::vector<std::vector<float> >& rPts, OutPointsIterator out) {
+    boost::for_each(rPts, [&](const std::vector<float>& pts) {
+        std::transform(std::begin(pts), std::begin(pts) + pts.size() / 2, std::begin(pts) + pts.size() / 2, std::back_inserter(*out++), boost::bind<Point>([](float xf, float yf) {
+            int x = static_cast<int> (std::floor(xf));
+            int y = static_cast<int> (std::floor(yf));
+            return Point(x, y);
+        }, _1, _2));
+    });
+}
+
+template<class OutPointsIterator>
+void generateRotatedPoints(const std::vector<float>& pts, OutPointsIterator out) {
+    std::vector<std::vector<float> > rPts(DIRECTION_NUMBER, std::vector<float>(pts.size()));
+    generateRotations(pts, std::begin(rPts));
+    generateBriefPoints(rPts, out);
+}
+
+template<class OutPointsIterator>
+void generateBriefFeatures(const Image& i, OutPointsIterator out) {
+    auto featuresNumber = std::min(i.width(), i.height());
+    std::vector<float> pts;
+    generateRandomPoints(featuresNumber, std::back_inserter(pts));
+    generateRotatedPoints(pts, out);
+}
+
+template <class SinglePassRange, class OutFeaturesIterator>
+void generateBriefSet(const SinglePassRange& queries, OutFeaturesIterator out) {
+    boost::for_each(queries, [&](const Image & i) {
+        generateBriefFeatures(i, std::begin(*out++));
+    });
+}
 
 #endif	/* CORE_HPP */
 

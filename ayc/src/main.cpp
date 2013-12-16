@@ -25,6 +25,7 @@
 
 using namespace cimg_library;
 
+
 //struct Log {
 //    boost::posix_time::ptime start;
 //    Log(const char* msg) : start(boost::posix_time::microsec_clock::local_time()) {
@@ -81,7 +82,7 @@ int main(int argc, char** argv) {
     } else {
         tsch.initialize();
     }
-    tbb::concurrent_vector<Result> thirdGrade;
+    tbb::concurrent_vector<Result> targets;
     std::vector<Result> finalResult;
 
     std::vector<Image> queryScales;
@@ -92,74 +93,58 @@ int main(int argc, char** argv) {
     auto QUERY_NUMBER = argc - 4;
     auto QUERY_SCALES_NUMBER = queryScales.size();
 
-    std::vector < std::vector<Image> > queryRotations(QUERY_SCALES_NUMBER);
-
     FeaturesVector circleSet(QUERY_SCALES_NUMBER, Features(CIRCLES_NUMBER));
-    FeaturesVector radianSet(QUERY_SCALES_NUMBER, Features(ROTATIONS_NUMBER));
-    FeaturesVector pointSet(QUERY_SCALES_NUMBER, Features(ROTATIONS_NUMBER));
+    FeaturesVector briefSet(QUERY_SCALES_NUMBER, Features(DIRECTION_NUMBER));
+
+    DescriptorsVector queryCircleDescriptorsVector(QUERY_SCALES_NUMBER, Descriptors(CIRCLES_NUMBER));
+    DescriptorsVector queryBriefDescriptorsVector(QUERY_SCALES_NUMBER, Descriptors(DIRECTION_NUMBER));
 
     Descriptors queryCircleDescriptors(QUERY_SCALES_NUMBER, Descriptor(CIRCLES_NUMBER));
-    std::vector<Descriptors> queryRadianDescriptorVector(QUERY_SCALES_NUMBER, Descriptors(ROTATIONS_NUMBER));
-    std::vector<Descriptors> queryTemplateDescriptorVector(QUERY_SCALES_NUMBER, Descriptors(ROTATIONS_NUMBER));
-
-    generateQueryRotations(queryScales, std::begin(queryRotations));
-    boost::for_each(queryScales, [](Image & q) {
-        q = q.blur(BLUR);
-    });
+    Descriptors queryIntensityDescriptors(QUERY_SCALES_NUMBER, Descriptor(CIRCLES_NUMBER));
 
     generateCirclesSet(queryScales, std::begin(circleSet));
-    generateRadianSet(queryScales, std::begin(radianSet));
-    generatePointSet(queryRotations, std::begin(pointSet));
+    generateBriefSet(queryScales, std::begin(briefSet));
 
-    evalQueryDescriptors(circleSet, std::begin(queryScales), std::begin(queryCircleDescriptors));
-    evalQueryRadianDescriptorsVector(radianSet, std::begin(queryScales), std::begin(queryRadianDescriptorVector));
-    evalQueryTemplateDescriptors(pointSet, std::begin(queryRotations), std::begin(queryTemplateDescriptorVector));
+    evalQueryDescriptorsVector(circleSet, std::begin(queryScales), std::begin(queryCircleDescriptorsVector));
+    reduceDescriptorsVector(queryCircleDescriptorsVector, std::begin(queryCircleDescriptors), boost::bind(sumDescriptorReducer, _1));
+    reduceDescriptorsVector(queryCircleDescriptorsVector, std::begin(queryIntensityDescriptors), boost::bind(maxIntensityReducer, _1));
+    evalQueryDescriptorsVector(briefSet, std::begin(queryScales), std::begin(queryBriefDescriptorsVector));
 
-    auto TemplateFilter = [&](const Point& center, int probableScale, int probableRotation) {
-        auto i = queryRotations[probableScale][probableRotation];
-        auto r = std::max(i.width(), i.height()) / 2;
-        if (!isFitImage(r, gray, center)) {
-            return;
-        }
-        Descriptor templateDescriptor;
-        evalPointDescriptor(pointSet[probableScale][probableRotation], center, gray, std::back_inserter(templateDescriptor));
-        auto cor = evalCorrelation(templateDescriptor, queryTemplateDescriptorVector[probableScale][probableRotation]);
-        if (cor > TEMPLATE_FILTER_THRESHOLD) {
-            thirdGrade.push_back(Result(probableScale, center.x, center.y, cor));
+
+    auto BriefFilter = [&](const Point& center, size_t probableScale, size_t probableRotation) {
+        Descriptor brief;
+        evalPointDescriptor(briefSet[probableScale][probableRotation], center, gray, std::back_inserter(brief));
+        float hamming = hammingDistance(brief, queryBriefDescriptorsVector[probableScale][probableRotation]);
+        if(hamming < BRIEF_FILTER_THRESHOLD) {
+            targets.push_back(Result(probableScale, center.x, center.y, hamming));
         }
     };
-
-    auto RadianFilter = [&](const Point& center, int probableScale) {
-        Descriptor radianDescriptor(ROTATIONS_NUMBER);
-        std::vector<float> correlations(ROTATIONS_NUMBER);
-        evalFeaturesSampleDescriptor(radianSet[probableScale], gray, center, std::begin(radianDescriptor));
-        boost::transform(queryRadianDescriptorVector[probableScale], std::begin(correlations), boost::bind(evalCorrelation, _1, boost::cref(radianDescriptor)));
-        auto min = boost::max_element(correlations);
-        if (*min > RADIAN_FILTER_THRESHOLD) {
-            TemplateFilter(center, probableScale, min - std::begin(correlations));
-        }
-    };
-
+    
     auto CircleFilter = [&](const Point & center) {
+        DescriptorsVector circleDescriptorsVector(QUERY_SCALES_NUMBER, Descriptors(CIRCLES_NUMBER));
         Descriptors circleDescriptors(QUERY_SCALES_NUMBER, Descriptor(CIRCLES_NUMBER));
         std::vector<float> correlations(QUERY_SCALES_NUMBER);
-        evalDescriptors(circleSet, gray, center, std::begin(circleDescriptors));
+        evalPointDescriptorsVector(circleSet, gray, center, std::begin(circleDescriptorsVector));
+        reduceDescriptorsVector(circleDescriptorsVector, std::begin(circleDescriptors), boost::bind(sumDescriptorReducer, _1));
         boost::transform(queryCircleDescriptors, circleDescriptors, std::begin(correlations), boost::bind(evalCorrelation, _1, _2));
-        auto min = boost::max_element(correlations);
-        if (*min > CIRCLE_FILTER_THRESHOLD) {
-            RadianFilter(center, min - std::begin(correlations));
+        auto max = boost::max_element(correlations);
+        if (*max > CIRCLE_FILTER_THRESHOLD) {
+            auto probableScale = max - std::begin(correlations);
+            auto probableRotation = chooseProbableRotation(circleDescriptorsVector[probableScale], queryIntensityDescriptors[probableScale], DIRECTION_NUMBER);
+            BriefFilter(center, probableScale, probableRotation);
         }
     };
 
     tbb::parallel_for(tbb::blocked_range2d<size_t>(0, gray.width(), GRAIN_SIZE, 0, gray.height(), GRAIN_SIZE),
-            [&](const tbb::blocked_range2d<size_t>& rng) {
-                boost::for_each(boost::irange(rng.rows().begin(), rng.rows().end()), [&](size_t i) {
-                    boost::for_each(boost::irange(rng.cols().begin(), rng.cols().end()), [&](size_t j) {
-                        CircleFilter(Point(i, j));
-                    });
+        [&](const tbb::blocked_range2d<size_t>& rng) {
+            boost::for_each(boost::irange(rng.rows().begin(), rng.rows().end()), [&](size_t i) {
+                boost::for_each(boost::irange(rng.cols().begin(), rng.cols().end()), [&](size_t j) {
+                    CircleFilter(Point(i, j));
                 });
             });
-    boost::for_each(thirdGrade, [&](const Result & candidate) {
+   });
+
+    boost::for_each(targets, [&](const Result & candidate) {
         auto f = boost::find_if(finalResult, boost::bind<bool>([&](const Result & result) {
             return (std::abs(candidate.x - result.x) < (queryScales[candidate.queryID].width() + queryScales[result.queryID].width()) / 2) &&
                     (std::abs(candidate.y - result.y) < (queryScales[candidate.queryID].height() + queryScales[result.queryID].height()) / 2);
@@ -173,7 +158,7 @@ int main(int argc, char** argv) {
     });
     boost::sort(finalResult);
     boost::for_each(finalResult, [&](const Result & r) {
-        std::cout << 1 + r.queryID / QUERY_SCALES_NUMBER << "\t" << (int)std::floor(r.x / ratio) << "\t" << (int)std::floor(r.y / ratio) << std::endl;
+        std::cout << 1 + r.queryID / QUERY_SCALES_NUMBER << "\t" << (int) std::floor(r.x / ratio) << "\t" << (int) std::floor(r.y / ratio) << std::endl;
     });
 }
 
