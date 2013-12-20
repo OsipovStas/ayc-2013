@@ -172,18 +172,18 @@ void evalQueryTemplateDescriptors(const FeaturesVector& featureSet, InputImageIt
 bool isFitImage(float r, const Image& i, const Point& c);
 float getMaxRadius(const Features& f);
 
-template<class OutputIterator>
-void evalFeaturesSampleDescriptor(const Features& features, const Image& i, const Point& c, OutputIterator out) {
+template<class OutputIterator, class Functor>
+void evalFeaturesSampleDescriptor(const Features& features, const Image& i, const Point& c, OutputIterator out, Functor f) {
     if (isFitImage(getMaxRadius(features), i, c)) {
-        boost::transform(features, out, boost::bind<float>(evalSample, _1, c, boost::cref(i)));
+        boost::transform(features, out, boost::bind<float>(f, _1, c, boost::cref(i)));
     }
 
 }
 
-template<class OutputIterator>
-void evalDescriptors(const FeaturesVector& featureSet, const Image& image, const Point& center, OutputIterator out) {
+template<class OutputIterator, class Functor>
+void evalDescriptors(const FeaturesVector& featureSet, const Image& image, const Point& center, OutputIterator out, Functor f) {
     boost::for_each(featureSet, [&](const Features & features) {
-        evalFeaturesSampleDescriptor(features, image, center, std::begin(*out++));
+        evalFeaturesSampleDescriptor(features, image, center, std::begin(*out++), f);
     });
 }
 

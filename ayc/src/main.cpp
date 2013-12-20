@@ -115,6 +115,10 @@ int main(int argc, char** argv) {
     evalQueryRadianDescriptorsVector(radianSet, std::begin(queryScales), std::begin(queryRadianDescriptorVector));
     evalQueryTemplateDescriptors(pointSet, std::begin(queryRotations), std::begin(queryTemplateDescriptorVector));
 
+    auto avg = [](const Points& points, const Point& center, const Image & image) {
+        return evalSample(points, center, image);
+    };
+
     auto TemplateFilter = [&](const Point& center, int probableScale, int probableRotation) {
         auto i = queryRotations[probableScale][probableRotation];
         auto r = std::max(i.width(), i.height()) / 2;
@@ -132,7 +136,7 @@ int main(int argc, char** argv) {
     auto RadianFilter = [&](const Point& center, int probableScale) {
         Descriptor radianDescriptor(ROTATIONS_NUMBER);
         std::vector<float> correlations(ROTATIONS_NUMBER);
-        evalFeaturesSampleDescriptor(radianSet[probableScale], gray, center, std::begin(radianDescriptor));
+        evalFeaturesSampleDescriptor(radianSet[probableScale], gray, center, std::begin(radianDescriptor), avg);
         boost::transform(queryRadianDescriptorVector[probableScale], std::begin(correlations), boost::bind(evalCorrelation, _1, boost::cref(radianDescriptor)));
         auto min = boost::max_element(correlations);
         if (*min > RADIAN_FILTER_THRESHOLD) {
@@ -143,7 +147,7 @@ int main(int argc, char** argv) {
     auto CircleFilter = [&](const Point & center) {
         Descriptors circleDescriptors(QUERY_SCALES_NUMBER, Descriptor(CIRCLES_NUMBER));
         std::vector<float> correlations(QUERY_SCALES_NUMBER);
-        evalDescriptors(circleSet, gray, center, std::begin(circleDescriptors));
+        evalDescriptors(circleSet, gray, center, std::begin(circleDescriptors), avg);
         boost::transform(queryCircleDescriptors, circleDescriptors, std::begin(correlations), boost::bind(evalCorrelation, _1, _2));
         auto min = boost::max_element(correlations);
         if (*min > CIRCLE_FILTER_THRESHOLD) {
@@ -173,7 +177,7 @@ int main(int argc, char** argv) {
     });
     boost::sort(finalResult);
     boost::for_each(finalResult, [&](const Result & r) {
-        std::cout << 1 + r.queryID / QUERY_SCALES_NUMBER << "\t" << (int)std::floor(r.x / ratio) << "\t" << (int)std::floor(r.y / ratio) << std::endl;
+        std::cout << 1 + r.queryID / QUERY_SCALES_NUMBER << "\t" << (int) std::floor(r.x / ratio) << "\t" << (int) std::floor(r.y / ratio) << std::endl;
     });
 }
 
