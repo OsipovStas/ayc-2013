@@ -46,8 +46,8 @@ const float RADIAN_FILTER_THRESHOLD = 0.9;
 const float TEMPLATE_FILTER_THRESHOLD = 0.9;
 
 struct Point {
-    const int x;
-    const int y;
+    int x;
+    int y;
 
     Point(int x, int y) : x(x), y(y) {
     }
